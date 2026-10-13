@@ -189,7 +189,7 @@ coeftest(m1, vcov = sandwich)    # sandwich standard errors
 **(a)** *(5 points)* What do the two ratios show? Is the assumption reasonable for these
 data? Cite the numbers. (Two or three sentences.)
 
-*Your answer to 2(a):* The deviance-df ratio=3.06, the chi-square-df ratio is 4.35. Both are greater than 1 it shows overdispersion. No the Poisson asumption of equal meana nd variance is not reasonable for this 
+*Your answer to 2(a):* The deviancedf ratio=3.06, the chisquaredf ratio is 4.35. Both are greater than 1 it shows overdispersion. No the Poisson asumption of equal meana nd variance is not reasonable for this 
 
 **(b)** *(10 points)* Compare the model-based and sandwich standard errors and p-values for
 `managed_careyes`. Why do they differ, and which result would you rely on for the
