@@ -1,0 +1,281 @@
+---
+title: "Midterm Examination, Part II: Applied Analysis"
+subtitle: "HDS 9304 — Advanced Data Analysis Methods"
+author: "Sitapriya N"
+date: "Tuesday, October 13, 2026"
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    code-copy: true
+    theme: cosmo
+    html-math-method: mathml
+execute:
+  # The file renders even if a chunk fails; the error message appears in the
+  # HTML. Do not change this.
+  error: true
+---
+
+## Instructions
+
+**Time:** 50 minutes, 2:10 to 3:00 PM. **Points:** 60, in four tasks of 15 points.
+Part II tests whether you can carry out and interpret an analysis with the tools you
+would actually use. The points are for statistical choices and interpretation, not for
+remembering R syntax.
+
+**What you may use.** Your notes, including your own HW1 and HW2, the posted homework
+keys, the lab and run-along notebooks, the decks and the readings. R's built-in help
+pages are allowed.
+
+**Network.** The only permitted network uses are D2L (to download this file), github.com
+(to submit) and R's local package documentation. Every other website, and every
+generative AI tool, is prohibited. Turn off any AI assistant built into your editor (for
+example GitHub Copilot in RStudio or Positron Assistant) before you start.
+
+**Where to work.** Unzip the download into the `assignments/` folder of your private course
+repository. This creates `assignments/midterm/`, holding this file and
+`medicaid-visits.csv`. Keep the two files in the same folder.
+
+**Submitting.** Replace `Your Name Here` above with your name. Render this file to HTML,
+then commit **both** `midterm-part2.qmd` and `midterm-part2.html` in
+`assignments/midterm/` and push to your course repository **by 3:00 PM**. The push time
+is the submission time. Render early, and render again before you push.
+
+**Written answers.** Brief, complete points are enough; bullet points are fine.
+
+**If your code does not run.** Write in words what you would fit or compute and why. That
+earns partial credit. This file is set to render even when a chunk has an error, so you can
+always produce the HTML.
+
+**If you cannot fit the Task 1 model.** Ask Yaomin for a printed slip with the one line of
+R code that fits it. Using the slip costs the 10 points for fitting the Task 1 model and
+nothing else: you can still earn the 5 points for explaining the choices, and all of Tasks
+2 to 4.
+
+**Grading of Tasks 2 to 4.** Tasks 2 to 4 are graded against the model you actually fitted
+in Task 1. A reasonable but wrong Task 1 model, checked and interpreted correctly afterwards, earns
+full credit on Tasks 2 to 4.
+
+## The data
+
+The 1986 Medicaid Consumer Survey studied adults eligible for Medicaid in Santa Barbara
+and Ventura counties, California. One group was enrolled in a managed-care demonstration
+program; a comparison group stayed in fee-for-service Medicaid. Each row is one person.
+Enrollment was **not** randomized.
+
+| Column | Meaning |
+|:--|:--|
+| `id` | Row number |
+| `visits` | Number of doctor visits during the observation period |
+| `days` | Length of the observation period, in days (32 to 120; 99% of people were observed for at least 89 days) |
+| `managed_care` | `yes`: enrolled in the managed-care program; `no`: fee-for-service comparison group (reference) |
+| `eligibility` | Medicaid eligibility group: `AFDC` (Aid to Families with Dependent Children; reference) or `SSI` (Supplemental Security Income) |
+| `gender` | `female` (reference) or `male` |
+| `age` | Age in years. The groups do not overlap in age: AFDC members are 16 to 64, SSI members 65 to 105 |
+| `health_pc1`, `health_pc2` | First and second principal-component scores of three health-status measures (functional limitations, acute conditions, chronic conditions). The documentation does not say which direction means worse health, so use them only as adjustment variables |
+| `access` | Availability of health services, from 0 (low) to 1 (high) |
+
+*Source:* Gurmu S (1997). Semi-parametric estimation of hurdle regression models with an
+application to Medicaid utilization. *Journal of Applied Econometrics* 12, 225–242. Data
+from the Journal of Applied Econometrics Data Archive.
+
+## Setup
+
+This chunk loads the same packages as Homework 2 and reads the data. **Do not modify it.**
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(here)
+library(faraway)
+library(MASS)              # glm.nb(), polr()
+library(pscl)              # zeroinfl(), hurdle()
+library(nnet)              # multinom()
+library(ResourceSelection) # hoslem.test()
+library(sandwich)          # sandwich standard errors
+library(lmtest)            # coeftest()
+library(VGAM)              # loaded after lmtest, so lrtest() is VGAM's. To compare two
+                           # glm() fits, write lmtest::lrtest() or use anova().
+select <- dplyr::select    # MASS also has a select(); use the dplyr one
+
+# The CSV must be in the same folder as this file.
+if (!file.exists("medicaid-visits.csv")) {
+  stop("medicaid-visits.csv not found. Put it in the same folder as this file, ",
+       "and set the working directory to that folder ",
+       "(RStudio: Session > Set Working Directory > To Source File Location).")
+}
+med <- read.csv("medicaid-visits.csv") %>%
+  mutate(managed_care = factor(managed_care, levels = c("no", "yes")),
+         eligibility  = factor(eligibility, levels = c("AFDC", "SSI")),
+         gender       = factor(gender, levels = c("female", "male")))
+glimpse(med)
+```
+
+## Function reference
+
+Each function you may need, with one example call. The example calls use placeholders
+(`<family>`, `<link>`, `<expression>`, `<test>`); choosing what goes there is part of the
+exam.
+
+| Function | What it does | Example call |
+|:--|:--|:--|
+| `glm()` | Fits a generalized linear model | `glm(y ~ x1 + x2, family = <family>(link = "<link>"), data = d)` |
+| `offset()` | Adds a term to the linear predictor with its coefficient fixed at 1 | `y ~ x1 + x2 + offset(<expression>)` |
+| `summary()` | Coefficient table, deviance, dispersion | `summary(m)` |
+| `coef()`, `exp()` | Coefficients; exponentiate them | `exp(coef(m))` |
+| `confint()`, `confint.default()` | 95% confidence intervals (profile likelihood; Wald) | `exp(confint(m))` |
+| `deviance()`, `df.residual()` | Residual deviance and its degrees of freedom | `deviance(m) / df.residual(m)` |
+| `residuals()` | Residuals of a chosen type | `residuals(m, type = "pearson")` |
+| `update()` | Refits a model with one argument changed | `update(m, family = <family>)` |
+| `formula()` | The model formula, including any offset term; can be passed to another fitting function | `formula(m)` |
+| `glm.nb()` (MASS) | Fits a negative binomial GLM with a log link | `glm.nb(y ~ x1 + x2, data = d)` |
+| `AIC()` | AIC of fits that have a likelihood | `AIC(m1, m2)` |
+| `coeftest()` (lmtest), `sandwich()` | Coefficient tests with sandwich standard errors | `coeftest(m, vcov = sandwich)` |
+| `anova()`, `lmtest::lrtest()` | Compare nested fits | `anova(m1, m2, test = "<test>")` |
+| `predict()` | Predictions, optionally for new data | `predict(m, newdata = nd, type = "response")` |
+
+---
+
+## Task 1: Choose and fit the model (15 points)
+
+*If your code does not run, write in words what you would fit or compute and why; that earns partial credit.*
+
+The question is how the number of doctor visits relates to managed-care enrollment,
+adjusting for eligibility group, the two health scores, gender, age and access. People were
+observed for different lengths of time.
+
+**(a)** *(10 points)* Fill in the three blanks below with your choices of family, link and
+offset, remove the `#` signs, and run the chunk. Keep the name `m1`; later tasks use it.
+
+```{r}
+#| label: task1
+ m1 <- glm(visits ~ managed_care + eligibility + health_pc1 + health_pc2 +
+             gender + age + access + offset(log(days)),
+           family = poisson(link = "log"),
+           data = med)
+summary(m1)
+```
+
+**(b)** *(5 points)* Explain why each of your three choices (family, link, offset) suits
+these data. One or two sentences for each is enough.
+
+*Your answer to 1(b):* Poisson: because visits is a non negative cout. Log link gives positive expected counts. We use offset to account for different lengths of observations. 
+
+## Task 2: Check the stated assumption and decide (15 points)
+
+*If your code does not run, write in words what you would fit or compute and why; that earns partial credit.*
+
+A Poisson model assumes that, for people with the same predictor values and observation
+period, the variance of `visits` equals its mean. Run the chunk below without changing it.
+It computes two checks of this assumption for `m1` and compares its model-based standard
+errors with sandwich standard errors. This chunk and the Task 3 chunks run only once `m1`
+exists: if they show no output after you render, check that your Task 1 chunk ran.
+
+```{r}
+#| label: task2
+#| eval: !expr exists("m1")  # runs once the Task 1 model exists
+c(deviance = deviance(m1), df = df.residual(m1),
+  ratio = deviance(m1) / df.residual(m1))
+pearson <- sum(residuals(m1, type = "pearson")^2)
+c(pearson = pearson, ratio = pearson / df.residual(m1))
+coeftest(m1)                     # model-based standard errors
+coeftest(m1, vcov = sandwich)    # sandwich standard errors
+```
+
+**(a)** *(5 points)* What do the two ratios show? Is the assumption reasonable for these
+data? Cite the numbers. (Two or three sentences.)
+
+*Your answer to 2(a):* The deviance-df ratio=3.06, the chi-square-df ratio is 4.35. Both are greater than 1 it shows overdispersion. No the Poisson asumption of equal meana nd variance is not reasonable for this 
+
+**(b)** *(10 points)* Compare the model-based and sandwich standard errors and p-values for
+`managed_careyes`. Why do they differ, and which result would you rely on for the
+managed-care question? (Three or four brief points.)
+
+*Your answer to 2(b):* They differ since Model SE=0.0469 p=0.0197.sandwich SE=0.1113 p=0.3256. Overdispersion made model SE too small. I would rely on sandwich result. The managedcare association is not statistically significant.
+
+## Task 3: Refit and compare (15 points)
+
+*If your code does not run, write in words what you would fit or compute and why; that earns partial credit.*
+
+The chunk below is a worked example. It refits your Task 1 model as quasi-Poisson;
+`update()` keeps the formula, offset and data the same.
+
+```{r}
+#| label: task3-example
+#| eval: !expr exists("m1")  # runs once the Task 1 model exists
+m_qp <- update(m1, family = quasipoisson)
+summary(m_qp)
+```
+
+**(a)** *(5 points)* Now fit a negative binomial model with the same predictors and the
+same offset, and name it `m_nb`. `update()` cannot make this change: the negative binomial
+is fitted by a different function, `glm.nb()`, which has no `family` argument. See the
+`glm.nb()` and `formula()` rows of the function reference. One line fits it; you may also
+print `summary(m_nb)`.
+
+```{r}
+#| label: task3a
+m_nb <- glm.nb(formula(m1), data = med)
+summary(m_nb)
+
+```
+
+**(b)** *(5 points)* Run the chunk below, which lines up the `managed_careyes` row from the
+three models and gives the AIC of the two likelihood-based fits. How does the conclusion
+about managed care change from the Poisson fit to the two refits, and why? (Two or three
+sentences.)
+
+```{r}
+#| label: task3b
+#| eval: !expr exists("m1")  # runs once the Task 1 model exists
+cmp <- rbind(Poisson = coef(summary(m1))["managed_careyes", ],
+             quasi   = coef(summary(m_qp))["managed_careyes", ],
+             negbin  = coef(summary(m_nb))["managed_careyes", ])
+colnames(cmp) <- c("Estimate", "Std. Error", "z or t value", "p-value")
+cmp
+AIC(m1, m_nb)   # quasi-Poisson has no likelihood, so no AIC
+```
+
+*Your answer to 3(b):* managed care is significant under Poisson (p=0.0197), but not under quasi-Poisson (p=0.2641) or negative binomial (p=0.1869). refits show ooverdispersion. standard errors increased but the estimated association about same. AIC is lower for negative binomial.
+
+**(c)** *(5 points)* Which refit, quasi-Poisson or negative binomial, would you use for Task
+4, and why? Give at least one reason, from the output above or from what each model
+assumes about the variance. (Two sentences.)
+
+*Your answer to 3(c):* I would use negative binomial model for overdispersion. Lower AIC is also one of teh reasons we can choose negative binomial
+
+## Task 4: Interpret for a clinical reader (15 points)
+
+*If your code does not run, write in words what you would fit or compute and why; that earns partial credit.*
+
+Use the model you chose in Task 3(c).
+
+Replace each `____` with the name of the model you chose in 3(c), remove the `#`, and run
+the chunk. It gives the rate ratio for managed care with its 95% confidence interval.
+
+```{r}
+#| label: task4
+exp(cbind(RR = coef(m_nb), confint(m_nb)))["managed_careyes", ]
+```
+
+**(a)** *(9 points)* In two or three sentences for a clinical reader, report the
+association between managed-care enrollment and the doctor-visit rate: the rate ratio with
+its 95% confidence interval, what it means in plain words, and what the interval tells the
+reader.
+
+*Your answer to 4(a):* managedcare had an estimated 11.1% lower doctorvisit rate than feeforservice participants RR = 0.889(0.747–1.057). the association is not statistically significant.
+
+**(b)** *(6 points)* People were not assigned to managed care. In one or two sentences, say
+what this means for how the result can be stated, and give one specific reason, other than
+the program itself, why enrollees and non-enrollees might differ in their visit rates.
+
+*Your answer to 4(b):* enrollment was not randomized it is an association not a causal effect. Another thing that can infuence visits is unmeasured care preferences
+
+---
+
+*End of Part II. Render, then commit and push `midterm-part2.qmd` and `midterm-part2.html`
+by 3:00 PM.*
