@@ -1,7 +1,7 @@
 ---
 title: "Midterm Examination, Part II: Applied Analysis"
 subtitle: "HDS 9304 — Advanced Data Analysis Methods"
-author: "Sitapriya N"
+author: "Sitapriya Neti"
 date: "Tuesday, October 13, 2026"
 format:
   html:
